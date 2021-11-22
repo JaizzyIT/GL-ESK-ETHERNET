@@ -23,6 +23,12 @@ enum{
 	TOGGLE
 }ledCommand;
 
+enum{
+	WRONG_FORMAT = -1,
+	WRONG_LED_NUMBER = -2,
+	WRONG_COMMAND = -3
+}commandErrors;
+
 int parseString (const char *string, int len);
 
 static int udpServerInit(void)
@@ -58,6 +64,8 @@ void StartUdpServerTask(void const * argument)
 	int nbytes;
 	char buffer[80];
 	int addr_len;
+	_Bool firstTime = 1;
+	int parseState;
 
 	osDelay(5000);// wait 5 sec to init lwip stack
 
@@ -68,8 +76,14 @@ void StartUdpServerTask(void const * argument)
 
 	for(;;)
 	{
-		  bzero(&client_addr, sizeof(client_addr));
-		  addr_len = sizeof(client_addr);
+		 bzero(&client_addr, sizeof(client_addr));
+		 addr_len = sizeof(client_addr);
+
+		 if (firstTime) {
+			UDP_SERVER_PRINTF("Command format: led <number>(0-3) <on/off/toggle>\n");
+			sendto(socket_fd, "Command format: led <number>(0-3) <on/off/toggle>\n", strlen("Command format: led <number>(0-3) <on/off/toggle>\n"), 0, (struct sockaddr *)&client_addr, (socklen_t)addr_len);
+			firstTime = 0;
+		 }
 
 		 nbytes = recvfrom(socket_fd, buffer, sizeof(buffer), 0, (struct sockaddr *) &client_addr, (socklen_t*) &addr_len);
 
@@ -89,13 +103,25 @@ void StartUdpServerTask(void const * argument)
 			 	continue;
 		 }
 		 else{
-				UDP_SERVER_PRINTF(buffer);
-	//			sendto(socket_fd, buffer, nbytes, 0, (struct sockaddr *)&client_addr, (socklen_t)addr_len);
-			 if (parseString(buffer, nbytes) < 0) {
-				UDP_SERVER_PRINTF("Command error. Correct format: led <number>(0-4) <on/off/toggle>\n");
-				sendto(socket_fd, "Command error. Correct format: led <number>(0-4) <on/off/toggle>\n", strlen("Command error. Correct format: led <number>(0-4) <on/off/toggle>\n"), 0, (struct sockaddr *)&client_addr, (socklen_t)addr_len);
+	//			UDP_SERVER_PRINTF(buffer);
+	//			sendto(socket_fd, buffer, nbytes, 0, (struct sockaddr *)&client_addr, (socklen_t)addr_len);					//echo mode
+
+			 parseState = parseString(buffer, nbytes);
+			 if (parseState == WRONG_FORMAT){
+				UDP_SERVER_PRINTF("Command error. Correct format: led <number>(0-3) <on/off/toggle>\n");
+				sendto(socket_fd, "Command error. Correct format: led <number>(0-3) <on/off/toggle>\n", strlen("Command error. Correct format: led <number>(0-3) <on/off/toggle>\n"), 0, (struct sockaddr *)&client_addr, (socklen_t)addr_len);
 				continue;
 			}
+			 else if (parseState == WRONG_LED_NUMBER){
+				UDP_SERVER_PRINTF("Wrong LED number, should be 0 to 3\n");
+				sendto(socket_fd, "Wrong LED number, should be 0 to 3\n", strlen("Wrong LED number, should be 0 to 3\n"), 0, (struct sockaddr *)&client_addr, (socklen_t)addr_len);
+				continue;
+			 }
+			 else if (parseState == WRONG_COMMAND){
+				UDP_SERVER_PRINTF("Wrong command, should be on/off/toggle\n");
+				sendto(socket_fd, "Wrong command, should be on/off/toggle\n", strlen("Wrong command, should be on/off/toggle\n"), 0, (struct sockaddr *)&client_addr, (socklen_t)addr_len);
+				continue;
+			 }
 			 else {
 				UDP_SERVER_PRINTF("Command accepted\n");
 				sendto(socket_fd, "Command accepted\n", strlen("Command accepted\n"), 0, (struct sockaddr *)&client_addr, (socklen_t)addr_len);
@@ -113,16 +139,16 @@ int parseString (const char *string, int len){
 
 	scanStatus = sscanf(string, "%s %u %s", ledStr, &ledNum, CommandStr);
 	if (scanStatus != 3 || (strcmp(ledStr, "led") != 0)){
-		return -1;
+		return WRONG_FORMAT;
 	}
 	else if (ledNum < 0 || ledNum > 3){
-		return -2;
+		return WRONG_LED_NUMBER;
 	}
 
 	if (strcmp(CommandStr, "on") == 0) command = ON;
 	else if(strcmp(CommandStr, "off") == 0) command = OFF;
 	else if(strcmp(CommandStr, "toggle") == 0) command = TOGGLE;
-	else return -3;
+	else return WRONG_COMMAND;
 
 	switch(command){
 	case ON:
